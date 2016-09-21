@@ -7,7 +7,7 @@
 #
 
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8.7 FATAL_ERROR)
-
+SET(Torch_DIR "/home/baci/torch/install/share/cmake/torch")
 OPTION(NO_THRIFT "enabling this will exclude all code that depends on Thrift from the build" OFF)
 OPTION(NO_FOLLY  "enabling this will exclude all code that depends on Folly from the build" OFF)
 OPTION(NO_TESTS  "enabling this will disable building tests" OFF)
