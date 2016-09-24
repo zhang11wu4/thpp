@@ -126,7 +126,7 @@ TEST(SerializationTest, StorageOffset) {
   }
 }
 
-TEST(SerializationTest, Empty0d) {
+TEST(SerializatioNTest, Empty0d) {
   Tensor<long> t;
   EXPECT_EQ(0, t.ndims());
   EXPECT_EQ(0, t.size());
@@ -185,33 +185,23 @@ TEST(SerializationTest, ThriftStorageShare) {
   ThriftStorage serialized;
   storage.serialize(serialized);
   auto ptr = storage.data();
+  auto size = storage.size();
   EXPECT_TRUE(static_cast<const void*>(serialized.data.data()) == ptr);
+  storage = Storage<long>();  // lose the reference from storage
 
-  Storage<long> deserialized(serialized);
-  EXPECT_EQ(storage.size(), deserialized.size());
+  Storage<long> deserialized(std::move(serialized));
+  EXPECT_EQ(size, deserialized.size());
   EXPECT_TRUE(deserialized.data() == ptr);  // shares memory
 }
 
-TEST(SerializationTest, ThriftStorageNoShare1) {
-  Storage<long> storage(size_t(1000), long(42));
-  ThriftStorage serialized;
-  storage.serialize(serialized, ThriftTensorEndianness::NATIVE, SHARE_NONE);
-  auto ptr = storage.data();
-  EXPECT_FALSE(static_cast<const void*>(serialized.data.data()) == ptr);
-
-  Storage<long> deserialized(serialized);
-  EXPECT_EQ(storage.size(), deserialized.size());
-  EXPECT_FALSE(deserialized.data() == storage.data());  // doesn't share
-}
-
-TEST(SerializationTest, ThriftStorageNoShare2) {
+TEST(SerializationTest, ThriftStorageNoShare) {
   Storage<long> storage(size_t(1000), long(42));
   ThriftStorage serialized;
   storage.serialize(serialized);
   auto ptr = storage.data();
   EXPECT_TRUE(static_cast<const void*>(serialized.data.data()) == ptr);
 
-  Storage<long> deserialized(serialized, SHARE_NONE);
+  Storage<long> deserialized(std::move(serialized));
   EXPECT_EQ(storage.size(), deserialized.size());
   EXPECT_FALSE(deserialized.data() == storage.data());  // doesn't share
 }
@@ -221,83 +211,6 @@ TEST(SerializationTest, ThriftStorageRefs) {
   Storage<long> s1({1000L});
   folly::IOBuf buf1 = s1.getIOBuf();
   buf2 = s1.getIOBuf();
-}
-
-TEST(SerializationTest, IOBufUnique) {
-  folly::IOBuf buf(folly::IOBuf::CREATE, sizeof(int));
-  *reinterpret_cast<int*>(buf.writableData()) = 42;
-  buf.append(sizeof(int));
-
-  // This situation may arise when deserializing: two Storage objects
-  // constructed from the same IOBuf.
-  Tensor<int> t1(Storage<int>(buf), 0, {1L});
-  Tensor<int> t2(Storage<int>(buf), 0, {1L});
-  EXPECT_EQ(42, t1.at(0));
-  EXPECT_EQ(42, t2.at(0));
-
-  // The two tensors are shared
-  EXPECT_FALSE(t1.isUnique());
-  EXPECT_FALSE(t2.isUnique());
-
-  // And they indeed share memory.
-  t1.at(0) = 43;
-  EXPECT_EQ(43, t2.at(0));
-
-  t2 = Tensor<int>();
-
-  // Still marked as shared; "buf" is still in scope and bumping the refcount.
-  EXPECT_FALSE(t1.isUnique());
-
-  // But no longer shared any more after killing buf.
-  buf = folly::IOBuf();
-  EXPECT_TRUE(t1.isUnique());
-}
-
-TEST(SerializationTest, Alignment) {
-  // large enough so the IOBuf data is out of line
-  constexpr long size = 4096;
-  constexpr size_t maxOffset = alignof(long);
-  for (size_t offset = 0; offset < maxOffset; ++offset) {
-    ThriftTensor serialized;
-    {
-      Tensor<long> t1 {size};
-      for (long i = 0; i < size; ++i) {
-        t1.at({i}) = i;
-      }
-      t1.serialize(serialized);
-    }
-
-    serialized.data.reserve(0, maxOffset);
-    serialized.data.advance(offset);
-
-    Tensor<long> t2(serialized);
-
-    auto ptr = reinterpret_cast<uintptr_t>(t2.data());
-    EXPECT_EQ(0, ptr % alignof(long));
-
-    EXPECT_EQ(1, t2.ndims());
-    EXPECT_EQ(size, t2.size(0));
-    for (long i = 0; i < size; ++i) {
-      EXPECT_EQ(i, t2.at({i}));
-    }
-  }
-}
-
-TEST(SerializationTest, BigTensorNarrow) {
-  auto t = thpp::Tensor<float>({32, 256, 6, 6});
-  t.zero();
-
-  auto t2 = t;
-  t2.narrow(1, 128, 128);
-  t2.fill(1);
-  EXPECT_EQ(32 * 128 * 6 * 6, t.sumall());  // other elements are 0
-  EXPECT_EQ(32 * 128 * 6 * 6, t2.sumall());
-
-  ThriftTensor serialized;
-  t2.serialize(serialized);
-
-  auto t3 = thpp::Tensor<float>(serialized);
-  EXPECT_EQ(32 * 128 * 6 * 6, t3.sumall());
 }
 
 }}  // namespaces

@@ -9,13 +9,7 @@
  */
 
 #include <thpp/Tensor.h>
-#ifndef NO_FOLLY
 #include <folly/Format.h>
-#endif
-
-////////////////////////////////////////////////////////////////////////////////
-#if !defined(NO_THRIFT) && !defined(NO_FOLLY)
-////////////////////////////////////////////////////////////////////////////////
 
 namespace thpp {
 namespace detail {
@@ -28,7 +22,7 @@ std::unique_ptr<folly::IOBuf> partialCloneOne(const folly::IOBuf& buf,
   DCHECK_LE(offset + length, buf.length());
   auto cloned = buf.cloneOne();
   cloned->trimStart(offset);
-  cloned->trimEnd(cloned->length() - length);
+  cloned->trimEnd(length - cloned->length());
   return cloned;
 }
 
@@ -42,7 +36,7 @@ void serialize(
     ThriftTensorDataType dtype,
     size_t elementSize,
     ThriftTensorEndianness endianness,
-    SharingMode sharing) {
+    bool mayShare) {
   DCHECK(!data.isChained());
   if (endianness == ThriftTensorEndianness::NATIVE) {
     endianness = gMachineEndianness;
@@ -99,12 +93,11 @@ void serialize(
     return;
   }
 
-  if (firstContiguousDim == 0) {
+  if (firstContiguousDim == 0 && mayShare) {
     // We're done.
-    DCHECK_GE(data.length(), dataSize);
-    data.trimEnd(data.length() - dataSize);
-    detail::applySharingMode(data, sharing);
     out.data = std::move(data);
+    DCHECK_GE(out.data.length(), dataSize);
+    out.data.trimEnd(out.data.length() - dataSize);
     return;
   }
 
@@ -125,20 +118,9 @@ void serialize(
   counter.resize(firstContiguousDim);
   int idx = firstContiguousDim;
   const uint8_t* src = data.data();
-  bool mayShare = false;
-  switch (sharing) {
-  case SHARE_NONE:
-    break;
-  case SHARE_IOBUF_MANAGED:
-    mayShare = data.isManagedOne();
-    break;
-  case SHARE_ALL:
-    mayShare = true;
-    break;
-  };
   while (idx >= 0) {
     if (idx == firstContiguousDim) {
-      if (mayShare && contiguousSize >= kMinCloneSize) {
+      if (contiguousSize >= kMinCloneSize) {
         appender.insert(partialCloneOne(data, src - data.data(),
                                         contiguousSize));
       } else {
@@ -160,12 +142,7 @@ void serialize(
   outQueue.move()->cloneInto(out.data);
 }
 
-
-template folly::IOBuf deserialize(const ThriftTensor& in,
+template folly::IOBuf deserialize(ThriftTensor& in,
                                   ThriftTensorDataType dtype);
 
 }}  // namespaces
-
-////////////////////////////////////////////////////////////////////////////////
-#endif // !NO_THRIFT && !NO_FOLLY
-////////////////////////////////////////////////////////////////////////////////

@@ -15,11 +15,10 @@
 typedef Tensor<real> TH_CONCAT_2(Real, Tensor);
 
 namespace detail {
-template <> struct TensorOps<Tensor<real>> {
+template <> struct TensorOps<real> {
   typedef real value_type;
   typedef accreal accurate_type;
   typedef THTensor type;
-  typedef Tensor<long> ArgTensorType;
 
   static real* _data(THTensor* t) {
     return THTensor_(data)(t);
@@ -145,9 +144,6 @@ template <> struct TensorOps<Tensor<real>> {
   static accreal _sumall(THTensor* t) {
     return THTensor_(sumall)(t);
   }
-  static accreal _prodall(THTensor* t) {
-    return THTensor_(prodall)(t);
-  }
   static void _add(THTensor* r, THTensor* t, real value) {
     return THTensor_(add)(r, t, value);
   }
@@ -177,6 +173,10 @@ template <> struct TensorOps<Tensor<real>> {
   static void _addmv(THTensor* r, real beta, THTensor* t, real alpha,
                     THTensor* mat, THTensor* vec) {
     return THTensor_(addmv)(r, beta, t, alpha, mat, vec);
+  }
+  // Note! frees m1, m2!!!
+  static void _match(THTensor* r, THTensor* m1, THTensor* m2, real gain) {
+    return THTensor_(match)(r, m1, m2, gain);
   }
   static void _addmm(THTensor* r, real beta, THTensor* t, real alpha,
                     THTensor* m1, THTensor* m2) {
@@ -209,6 +209,12 @@ template <> struct TensorOps<Tensor<real>> {
   static void _sign(THTensor* r, THTensor* t) {
     return THTensor_(sign)(r, t);
   }
+  static accreal _trace(THTensor* t) {
+    return THTensor_(trace)(t);
+  }
+  static void _cross(THTensor* r, THTensor* a, THTensor* b, int dim) {
+    return THTensor_(cross)(r, a, b, dim);
+  }
 
 #define S1(X) #X
 #define S(X) S1(X)
@@ -219,7 +225,7 @@ template <> struct TensorOps<Tensor<real>> {
 };
 
 #define S(TYPE) \
-  template <> inline void TensorOps<Tensor<real>>::_copyT<TH##TYPE##Tensor>( \
+  template <> inline void TensorOps<real>::_copyT<TH##TYPE##Tensor>( \
       THTensor* self, TH##TYPE##Tensor* src) { \
     return THTensor_(copy##TYPE)(self, src); \
   }

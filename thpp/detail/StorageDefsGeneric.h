@@ -8,8 +8,6 @@
  *
  */
 
-// override-include-guard
-
 #ifndef THPP_INCLUDE_STORAGE_DEFS
 #error This file may only be included from StorageDefs.cpp
 #endif
@@ -20,7 +18,7 @@
 
 namespace thpp { namespace detail {
 
-constexpr const char* StorageOps<Storage<real>>::kLuaTypeName;
+constexpr const char* StorageOps<real>::kLuaTypeName;
 
 }}  // namespaces
 

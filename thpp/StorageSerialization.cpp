@@ -10,10 +10,6 @@
 
 #include <thpp/Storage.h>
 
-////////////////////////////////////////////////////////////////////////////////
-#if !defined(NO_THRIFT) && !defined(NO_FOLLY)
-////////////////////////////////////////////////////////////////////////////////
-
 namespace thpp {
 namespace detail {
 
@@ -22,7 +18,7 @@ void serialize(
     folly::IOBuf&& data,
     ThriftTensorDataType dtype,
     ThriftTensorEndianness endianness,
-    SharingMode sharing) {
+    bool mayShare) {
   DCHECK(!data.isChained());
   if (endianness == ThriftTensorEndianness::NATIVE) {
     endianness = gMachineEndianness;
@@ -33,15 +29,13 @@ void serialize(
 
   out.dataType = dtype;
   out.endianness = endianness;
-  detail::applySharingMode(data, sharing);
+  if (!mayShare) {
+    data.unshareOne();
+  }
   out.data = std::move(data);
 }
 
-template folly::IOBuf deserialize(const ThriftStorage& in,
+template folly::IOBuf deserialize(ThriftStorage& in,
                                   ThriftTensorDataType dtype);
 
 }}  // namespaces
-
-////////////////////////////////////////////////////////////////////////////////
-#endif // !NO_THRIFT && !NO_FOLLY
-////////////////////////////////////////////////////////////////////////////////

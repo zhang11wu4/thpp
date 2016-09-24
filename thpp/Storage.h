@@ -11,92 +11,60 @@
 #ifndef THPP_STORAGE_H_
 #define THPP_STORAGE_H_
 
-#ifndef DCHECK
-#include <cassert>
-#define DCHECK(x) assert(x)
-#endif
-
-#include <initializer_list>
-#include <memory>
-#ifndef NO_THRIFT
+#include <thpp/detail/Storage.h>
 #include <thpp/if/gen-cpp2/Tensor_types.h>
-#endif
-#ifndef NO_FOLLY
 #include <folly/Malloc.h>
 #include <folly/Range.h>
 #include <folly/io/IOBuf.h>
-#endif
-#include <thpp/StorageBase.h>
-#include <thpp/detail/Storage.h>
 
 namespace thpp {
 
-#ifndef NO_FOLLY
 using folly::Range;
-#endif
 
 /**
  * Wrapper around TH's Storage type, which is a length-aware,
  * reference-counted, heap-allocated array.
  */
 template <class T> class Tensor;
-template <class T> class CudaTensor;
 
-#ifndef NO_FOLLY
-enum SharingMode {
-  // Do not share memory with the given IOBuf.
-  SHARE_NONE,
-
-  // Share memory managed by IOBuf (no additional bookkeeping required)
-  SHARE_IOBUF_MANAGED,
-
-  // Share all memory, including external buffers (which might require you to
-  // guarantee that such external buffers remain allocated until all IOBuf
-  // and Storage objects that refer to them are visible)
-  SHARE_ALL,
-};
-#endif
+namespace detail {
+template <class T> class StorageHolder;
+}  // namespace
 
 template <class T>
-class Storage : public StorageBase<T, Storage<T>> {
-  typedef StorageBase<T, Storage<T>> Base;
-  typedef typename Base::Ops Ops;
-  friend Base;  // Yay C++11
+class Storage {
+  friend class detail::StorageHolder<T>;
   friend class Tensor<T>;
+  typedef detail::StorageOps<T> Ops;
  public:
-  typedef typename Base::THType THType;
+  typedef T value_type;
+  typedef T& reference;
+  typedef const T& const_reference;
+  typedef T* pointer;
+  typedef const T* const_pointer;
+  typedef T* iterator;
+  typedef const T* const_iterator;
+  typedef size_t size_type;
+  typedef ptrdiff_t difference_type;
+  typedef typename Ops::type THType;
+
   Storage();
 
   explicit Storage(std::initializer_list<T> data);
   template <class It> Storage(It begin, It end);
   Storage(size_t n, T value);
 
-  explicit Storage(THType* t);
-
-////////////////////////////////////////////////////////////////////////////////
-#ifndef NO_FOLLY
-////////////////////////////////////////////////////////////////////////////////
-
   explicit Storage(Range<const T*> range)
     : Storage(range.begin(), range.end()) { }
 
+  explicit Storage(THType* t);
 
   // Create a Storage object containing the data from an IOBuf.
-  // If sharing is not SHARE_NONE, then the Storage object will share memory
-  // with the IOBuf, at least until either is resized.
-  explicit Storage(folly::IOBuf&& iob,
-                   SharingMode sharing = SHARE_IOBUF_MANAGED,
-                   bool resizable = true);
-  explicit Storage(const folly::IOBuf& iob,
-                   SharingMode sharing = SHARE_IOBUF_MANAGED,
-                   bool resizable = true)
-    : Storage(folly::IOBuf(iob), sharing, resizable) { }
+  explicit Storage(folly::IOBuf&& iob);
+  explicit Storage(folly::IOBuf& iob) : Storage(*iob.clone()) { }
 
-#if !defined(NO_THRIFT) && !defined(NO_FOLLY)
   // Deserialize from Thrift. Throws if wrong type.
-  explicit Storage(const ThriftStorage& thriftStorage,
-                   SharingMode sharing = SHARE_IOBUF_MANAGED);
-#endif
+  explicit Storage(ThriftStorage&& thriftStorage);
 
   // Takes ownership of a range allocated with malloc() (NOT new or new[]!)
   static Storage takeOwnership(Range<T*> data);
@@ -105,23 +73,15 @@ class Storage : public StorageBase<T, Storage<T>> {
   // objects that refer to it are gone.
   static Storage wrap(Range<T*> data);
 
+  // Use a custom allocator. The allocator is managed by the caller.
+  static Storage withAllocator(THAllocator* allocator,
+                               void* allocatorContext);
+
   // Wrap a range of memory and use a custom allocator for reallocations.
   // You probably don't need this.
   static Storage wrapWithAllocator(Range<T*> data,
                                    THAllocator* allocator,
                                    void* allocatorContext);
-
-////////////////////////////////////////////////////////////////////////////////
-#endif // !NO_FOLLY
-////////////////////////////////////////////////////////////////////////////////
-
-  static Storage wrapWithAllocator(T* data, size_t size,
-                                   THAllocator* allocator,
-                                   void* allocatorContext);
-
-  // Use a custom allocator. The allocator is managed by the caller.
-  static Storage withAllocator(THAllocator* allocator,
-                               void* allocatorContext);
 
   ~Storage();
 
@@ -130,66 +90,63 @@ class Storage : public StorageBase<T, Storage<T>> {
   Storage& operator=(Storage&& other);
   Storage& operator=(const Storage& other);
 
+  T* data() { return t_ ? t_->data : nullptr; }
+  const T* data() const { return t_ ? t_->data : nullptr; }
+  iterator begin() { return data(); }
+  const_iterator begin() const { return data(); }
+  const_iterator cbegin() const { return data(); }
+  iterator end() { return t_ ? (t_->data + t_->size) : nullptr; }
+  const_iterator end() const { return t_ ? (t_->data + t_->size) : nullptr; }
+  const_iterator cend() const { return end(); }
+
+  T& operator[](size_t index) { return data()[index]; }
+  const T& operator[](size_t index) const { return data()[index]; }
+  T& at(size_t index) { check(index); return operator[](index); }
+  const T& at(size_t index) const { check(index); return operator[](index); }
+
+  size_t size() const { return t_ ? t_->size : 0; }
+
+  void resizeUninitialized(size_t n);
   void resize(size_t n, T value = 0);
 
   template <class It> void assign(It begin, It end);
   void assign(size_t n, T value);
 
-////////////////////////////////////////////////////////////////////////////////
-#ifndef NO_FOLLY
-////////////////////////////////////////////////////////////////////////////////
+  bool unique() const { return !t_ || t_->refcount == 1; }
 
-  // Create a IOBuf that wraps the memory currently allocated to this
-  // storage offset. The memory won't be freed until all references to it
-  // are gone, either from IOBufs or from Storage objects. Note that
-  // if this Storage is resized, it might not share memory with the
-  // returned IOBuf any more.
+  // Create a IOBuf that wraps this storage object. The storage object
+  // won't get deleted until all references to the IOBuf are gone.
   folly::IOBuf getIOBuf();
 
-#if !defined(NO_THRIFT) && !defined(NO_FOLLY)
   // Serialize to Thrift.
   void serialize(ThriftStorage& out,
                  ThriftTensorEndianness endianness =
                      ThriftTensorEndianness::NATIVE,
-                 SharingMode sharing = SHARE_IOBUF_MANAGED) const;
-#endif
+                 bool mayShare = true) const;
 
-  // This is obvious, except on Cuda, where it isn't.
-  T read(size_t offset) const {
-    DCHECK_LT(offset, this->size());
-    return this->data()[offset];
-  }
+  static constexpr const char* kLuaTypeName = Ops::kLuaTypeName;
 
-  void read(size_t offset, T* dest, size_t n) const {
-    DCHECK_LE(offset + n, this->size());
-    memcpy(dest, this->data() + offset, n * sizeof(T));
-  }
-
-  void write(size_t offset, T value) {
-    DCHECK_LT(offset, this->size());
-    this->data()[offset] = value;
-  }
-
-  void write(size_t offset, const T* src, size_t n) {
-    DCHECK_LE(offset + n, this->size());
-    memcpy(this->data() + offset, src, n * sizeof(T));
-  }
-
-////////////////////////////////////////////////////////////////////////////////
-#endif // !NO_FOLLY
-////////////////////////////////////////////////////////////////////////////////
-
-  bool isUnique() const { return isUnique(this->t_); }
-  static bool isUnique(const THType* th);
-
+  // Get a pointer to the underlying TH object; *this releases ownership
+  // of that object.
+  THType* moveAsTH();
  private:
   template <class U> friend class Tensor;
-  template <class U> friend class CudaTensor;
 
-#ifndef NO_FOLLY
-  void setFromIOBuf(folly::IOBuf&& iob, SharingMode sharing, bool resizable);
-#endif
+  void setFromIOBuf(folly::IOBuf&& iob);
+  void up();
+  void down();
+  void check(size_t index) const;
+
+  THType* th() { return t_; }
+  const THType* th() const { return t_; }
+
+  // NOTE: May not have any other fields, as we reinterpret_cast
+  // liberally between Ops::type* and Storage*
+  THType* t_;
 };
+
+template <class T>
+constexpr const char* Storage<T>::kLuaTypeName;
 
 /**
  * Wrap a THAllocator-like object with a C++ interface into THAllocator.
@@ -197,6 +154,8 @@ class Storage : public StorageBase<T, Storage<T>> {
 template <class A>
 class THAllocatorWrapper {
  public:
+  static THAllocator thAllocator;
+ private:
   static void* malloc(void* ctx, long size) {
     return static_cast<A*>(ctx)->malloc(size);
   }
@@ -210,6 +169,7 @@ class THAllocatorWrapper {
 
 }  // namespaces
 
+#include <thpp/StorageSerialization-inl.h>
 #include <thpp/Storage-inl.h>
 
 #endif /* THPP_STORAGE_H_ */

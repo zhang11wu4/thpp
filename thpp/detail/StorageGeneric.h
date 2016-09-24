@@ -12,14 +12,12 @@
 #define TH_GENERIC_FILE "thpp/detail/StorageGeneric.h"
 #else
 
-#ifndef NO_FOLLY
 typedef Range<const real*> TH_CONCAT_2(Real, Range);
 typedef Range<real*> TH_CONCAT_3(Mutable, Real, Range);
-#endif
 typedef Storage<real> TH_CONCAT_2(Real, Storage);
 
 namespace detail {
-template <> struct StorageOps<Storage<real>> {
+template <> struct StorageOps<real> {
   typedef THStorage type;
 
   static THStorage* _newWithSize(long size) {
