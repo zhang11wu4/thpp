@@ -25,7 +25,7 @@ fi
 #  exit 1
 #fi
 
-sudo cp /home/baic/downloads/gtest-1.7.0.zip gtest-1.7.0.zip
+sudo cp /home/baic/Downloads/gtest-1.7.0.zip gtest-1.7.0.zip
 unzip gtest-1.7.0.zip
 
 # Build in a separate directory
