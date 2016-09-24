@@ -10,7 +10,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 2.8.7 FATAL_ERROR)
 
 # Torch messes this up
 SET(SAVED_CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
-
+SET(Torch_DIR "/home/baic/torch/install/share/cmake/torch")
 # Use our own cmake scripts
 SET(CMAKE_MODULE_PATH
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
